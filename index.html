@@ -1,0 +1,794 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PIC16F18857 + 8x8 ドットマトリクス LED シミュレータ</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg: #0a0e17; --surface: #131b2e; --border: #1e293b;
+            --ink: #e2e8f0; --muted: #94a3b8; --accent: #06b6d4;
+            --success: #10b981; --warning: #f59e0b; --error: #ef4444;
+            --port-a: #f59e0b; --port-b: #06b6d4; --port-c: #10b981;
+        }
+        * { box-sizing: border-box; }
+        body { margin: 0; font-family: 'Inter', 'Hiragino Sans', 'Yu Gothic', 'Noto Sans JP', sans-serif; background: var(--bg); color: var(--ink); height: 100vh; overflow: hidden; }
+        .font-mono { font-family: 'JetBrains Mono', 'Consolas', monospace; }
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: #090d16; }
+        ::-webkit-scrollbar-thumb { background: #1e293b; border-radius: 3px; }
+        .editor-text-style { font-family: 'JetBrains Mono', monospace; font-size: 13px; line-height: 22px; }
+        .sw-active { background: rgba(245,158,11,0.2) !important; border-color: var(--warning) !important; box-shadow: 0 0 8px rgba(245,158,11,0.4); }
+        .sw-led-active { background: var(--warning) !important; box-shadow: 0 0 8px var(--warning); }
+        .pin-active-a { color: var(--port-a); text-shadow: 0 0 4px var(--port-a); }
+        .pin-active-b { color: var(--port-b); text-shadow: 0 0 4px var(--port-b); }
+        .pin-active-c { color: var(--port-c); text-shadow: 0 0 4px var(--port-c); }
+        .console-line { padding: 2px 0; border-bottom: 1px solid rgba(30,41,59,0.5); }
+        .console-time { color: #475569; font-size: 10px; }
+        .console-info { color: #cbd5e1; } .console-success { color: var(--success); font-weight: 600; }
+        .console-warn { color: var(--warning); } .console-error { color: var(--error); font-weight: 600; }
+        .console-system { color: var(--accent); }
+        .error-item { cursor: pointer; transition: all 0.15s; }
+        .error-item:hover { background: rgba(239,68,68,0.15); transform: translateX(2px); }
+        .btn-press:active { transform: translateY(1px); }
+        .matrix-container { background: #000; border-radius: 8px; box-shadow: inset 0 0 20px rgba(0,0,0,0.8); }
+        .tooltip { position: relative; }
+        .tooltip::after { content: attr(data-tip); position: absolute; bottom: 100%; left: 50%; transform: translateX(-50%); background: #1e293b; color: #e2e8f0; padding: 2px 8px; border-radius: 4px; font-size: 10px; white-space: nowrap; opacity: 0; pointer-events: none; transition: opacity 0.2s; border: 1px solid #334155; z-index: 100; }
+        .tooltip:hover::after { opacity: 1; }
+        @keyframes pulse-dot { 0%,100%{opacity:1} 50%{opacity:0.5} }
+        .animate-pulse-dot { animation: pulse-dot 2s infinite; }
+    </style>
+</head>
+<body class="h-screen flex flex-col">
+
+<header class="h-14 bg-slate-900 border-b border-slate-800 flex items-center justify-between px-4 shrink-0 z-30">
+    <div class="flex items-center space-x-3">
+        <div class="flex items-center justify-center w-9 h-9 rounded-lg bg-cyan-950 border border-cyan-500/30 text-cyan-400 font-mono font-bold text-sm">PIC</div>
+        <div>
+            <h1 class="font-bold text-slate-100 text-sm tracking-wide flex items-center gap-2">
+                PIC16F18857 + 8x8 ドットマトリクス LED シミュレータ
+                <span class="text-[10px] font-mono px-2 py-0.5 rounded bg-cyan-950 text-cyan-400 border border-cyan-800">XC8 Compatible</span>
+            </h1>
+            <p class="text-[11px] text-slate-400">配線: A=タクトスイッチ / B=直接(カソード列) / C=1k&#x2126;抵抗(アノード行)</p>
+        </div>
+    </div>
+    <div class="flex items-center space-x-3 overflow-x-auto whitespace-nowrap">
+        <button id="btn-flash" class="btn-press flex items-center space-x-2 px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white font-medium text-xs rounded-md shadow-lg transition-all border border-emerald-400/30 shrink-0">
+            <svg class="w-4 h-4 fill-current" viewBox="0 0 24 24"><path d="M7 2v11h3v9l7-12h-4l4-8z"/></svg><span>コンパイル＆書き込み</span>
+        </button>
+        <button id="btn-run" class="btn-press flex items-center space-x-2 px-3.5 py-1.5 bg-cyan-600 hover:bg-cyan-500 text-white font-medium text-xs rounded-md shadow transition-all border border-cyan-400/30 shrink-0">
+            <span id="run-icon">&#x25B6;</span><span id="run-text">実行</span>
+        </button>
+        <button id="btn-reset" class="btn-press flex items-center space-x-1.5 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 font-medium text-xs rounded-md transition-all border border-slate-700 shrink-0">
+            <span>MCLR リセット</span>
+        </button>
+        <div class="h-5 w-px bg-slate-800 shrink-0"></div>
+        <div class="flex items-center space-x-2 shrink-0">
+            <label class="text-xs text-slate-400 font-medium">サンプル:</label>
+            <select id="preset-select" class="bg-slate-950 border border-slate-700 text-slate-200 text-xs rounded-md px-2 py-1 outline-none focus:border-cyan-500">
+                <option value="default">1. スイッチ切替 ダイナミック点灯</option>
+                <option value="scroll">2. 自動スクロールアニメーション</option>
+                <option value="diag">3. 回路診断スウィープテスト</option>
+                <option value="chase">4. 蛇行（チェイス）点灯</option>
+                <option value="button_draw">5. ボタンで自由描画</option>
+                <option value="error_demo">6. 構文エラーデモ（修正練習）</option>
+            </select>
+        </div>
+        <div class="h-5 w-px bg-slate-800 shrink-0"></div>
+        <div class="flex items-center space-x-2 bg-slate-950 px-2.5 py-1 rounded-md border border-slate-800 shrink-0">
+            <span class="text-[11px] text-slate-400 font-mono">速度:</span>
+            <input id="speed-slider" type="range" min="0.1" max="5.0" step="0.1" value="1.0" class="w-16 accent-cyan-500 cursor-pointer">
+            <span id="speed-val" class="text-[11px] font-mono text-cyan-400 w-10">1.0x</span>
+        </div>
+    </div>
+</header>
+
+<div class="flex-1 flex overflow-hidden">
+    <div class="w-1/2 flex flex-col border-r border-slate-800 bg-slate-900/60">
+        <div class="h-9 bg-slate-900/90 border-b border-slate-800 flex items-center justify-between px-4 text-xs font-mono text-slate-400 select-none">
+            <div class="flex items-center space-x-2">
+                <span class="w-2.5 h-2.5 rounded-full bg-emerald-400" id="status-indicator"></span>
+                <span class="text-slate-200 font-medium">main.c</span>
+                <span id="editor-status" class="text-[10px] text-emerald-400 bg-emerald-950/80 px-1.5 py-0.5 rounded border border-emerald-800/50">構文チェック完了</span>
+            </div>
+            <div class="flex items-center space-x-4 text-[11px]">
+                <span id="error-badge" class="hidden text-[10px] font-semibold text-red-400 bg-red-950/80 border border-red-800/80 px-2 py-0.5 rounded-full animate-pulse">0 Errors</span>
+                <span>Target: PIC16F18857</span>
+                <span id="cursor-pos">Ln 1, Col 1</span>
+            </div>
+        </div>
+        <div class="flex-1 relative flex overflow-hidden bg-slate-950">
+            <div id="line-gutter" class="w-14 bg-slate-950 text-slate-600 py-3 select-none border-r border-slate-800/80 text-xs font-mono overflow-hidden flex flex-col shrink-0"></div>
+            <textarea id="code-editor" class="flex-1 bg-transparent text-slate-100 py-3 px-3 outline-none resize-none editor-text-style whitespace-pre border-none focus:ring-0 z-10 select-text overflow-auto" spellcheck="false" placeholder="// XC8 Cコードを入力..."></textarea>
+        </div>
+        <div id="error-panel" class="border-t border-slate-800 bg-slate-950/95 max-h-48 flex flex-col overflow-hidden shrink-0">
+            <div class="h-7 bg-slate-900/90 border-b border-slate-800 px-3 flex items-center justify-between text-xs text-slate-300 font-mono">
+                <span class="flex items-center gap-1.5 font-bold text-red-400">
+                    <svg class="w-3.5 h-3.5 fill-current" viewBox="0 0 20 20"><path d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z"/></svg>
+                    検出された構文エラー (<span id="error-count-text">0</span>件)
+                </span>
+                <span class="text-[10px] text-slate-500">項目クリックで該当行へジャンプ</span>
+            </div>
+            <div id="error-list" class="p-2 overflow-y-auto space-y-1 text-xs font-mono flex-1">
+                <div class="text-slate-500 italic px-2 py-1">構文エラーはありません。</div>
+            </div>
+        </div>
+    </div>
+
+    <div class="w-1/2 flex flex-col bg-slate-950 overflow-y-auto">
+        <div class="p-4 grid grid-cols-12 gap-4 border-b border-slate-800/80">
+            <div class="col-span-6 bg-slate-900/80 border border-slate-800 rounded-xl p-3 flex flex-col items-center shadow-lg">
+                <div class="w-full flex items-center justify-between mb-2">
+                    <span class="text-xs font-semibold text-slate-300 flex items-center gap-1.5">
+                        <span class="w-2 h-2 rounded-full bg-red-500 animate-pulse-dot"></span>PARA LIGHT 0 M0A20UB0186J
+                    </span>
+                    <span class="text-[10px] font-mono text-slate-500">8x8 LED Matrix</span>
+                </div>
+                <div class="relative p-2 mt-4 ml-4 matrix-container flex items-center justify-center">
+                    <div class="absolute -top-4 left-6 right-6 flex justify-between text-[9px] font-mono text-cyan-400">
+                        <span>RB0</span><span>RB1</span><span>RB2</span><span>RB3</span><span>RB4</span><span>RB5</span><span>RB6</span><span>RB7</span>
+                    </div>
+                    <div class="absolute -left-5 top-6 bottom-6 flex flex-col justify-between text-[9px] font-mono text-emerald-400">
+                        <span>RC0</span><span>RC1</span><span>RC2</span><span>RC3</span><span>RC4</span><span>RC5</span><span>RC6</span><span>RC7</span>
+                    </div>
+                    <canvas id="matrix-canvas" width="240" height="240" class="rounded bg-black"></canvas>
+                </div>
+                <div class="mt-2 text-[10px] text-slate-400 text-center font-mono leading-relaxed">
+                    カソード(列): PORTB (LOWで点灯 / 直接接続)<br>アノード(行): PORTC (HIGHで点灯 / 1k&#x2126;抵抗経由)
+                </div>
+            </div>
+            <div class="col-span-6 flex flex-col gap-3">
+                <div class="bg-slate-900/80 border border-slate-800 rounded-xl p-3 shadow-lg flex-1 flex flex-col justify-between">
+                    <div class="flex items-center justify-between border-b border-slate-800 pb-1.5 mb-1.5">
+                        <span class="text-xs font-semibold text-slate-300">1k&#x2126; 抵抗アレイ (PORTC &#x2192; アノード)</span>
+                        <span class="text-[10px] font-mono text-amber-400 bg-amber-950/50 px-1.5 py-0.5 rounded border border-amber-800/40">電流制限</span>
+                    </div>
+                    <div class="space-y-1 my-1" id="resistor-network-graphic"></div>
+                    <div class="text-[10px] text-slate-400 leading-tight">PORTC各ピン(RC0-RC7)に1k&#x2126;抵抗を直列挿入。<br>LATC=HIGH時に電流が流れ、対応行が選択される。</div>
+                </div>
+                <div class="bg-slate-900/80 border border-slate-800 rounded-xl p-3 shadow-lg">
+                    <div class="flex items-center justify-between border-b border-slate-800 pb-1.5 mb-2">
+                        <span class="text-xs font-semibold text-slate-300">PORT A タクトスイッチ (RA0&#xFF5E;RA7)</span>
+                        <span class="text-[10px] font-mono text-slate-400">キー '1'-'8' 対応</span>
+                    </div>
+                    <div class="grid grid-cols-4 gap-2" id="switches-grid"></div>
+                </div>
+            </div>
+        </div>
+        <div class="p-4 grid grid-cols-12 gap-4">
+            <div class="col-span-6 bg-slate-900/80 border border-slate-800 rounded-xl p-3 shadow-lg flex flex-col items-center">
+                <div class="w-full flex items-center justify-between border-b border-slate-800 pb-1.5 mb-2">
+                    <span class="text-xs font-semibold text-slate-300">PIC16F18857 (28-Pin DIP)</span>
+                    <span class="text-[10px] font-mono text-cyan-400">ピン状態モニター</span>
+                </div>
+                <div class="relative w-full px-1 py-1 flex justify-center">
+                    <div class="w-56 bg-slate-950 border-2 border-slate-700 rounded-lg pt-8 pb-2 px-1 flex justify-between relative shadow-2xl">
+                        <div class="absolute top-0 left-1/2 -translate-x-1/2 w-6 h-2.5 bg-slate-900 border-b-2 border-x-2 border-slate-700 rounded-b-full"></div>
+                        <div class="text-[10px] font-mono text-slate-500 absolute top-4 left-1/2 -translate-x-1/2 font-bold tracking-wider">PIC16F18857</div>
+                        <div class="flex flex-col space-y-1 text-[8.5px] font-mono text-slate-400" id="chip-pins-left"></div>
+                        <div class="flex flex-col space-y-1 text-[8.5px] font-mono text-slate-400 text-right" id="chip-pins-right"></div>
+                    </div>
+                </div>
+                <div class="w-full mt-2 pt-2 border-t border-slate-800 flex justify-around text-[10px] font-mono">
+                    <span class="text-amber-400">&#x25CF; PORTA = スイッチ入力</span>
+                    <span class="text-cyan-400">&#x25CF; PORTB = カソード列(直接)</span>
+                    <span class="text-emerald-400">&#x25CF; PORTC = アノード行(1k&#x2126;)</span>
+                </div>
+            </div>
+            <div class="col-span-6 bg-slate-900/80 border border-slate-800 rounded-xl p-3 shadow-lg flex flex-col">
+                <div class="flex items-center justify-between border-b border-slate-800 pb-1.5 mb-2">
+                    <span class="text-xs font-semibold text-slate-300">レジスタ・ライブモニター</span>
+                    <span class="text-[10px] font-mono text-emerald-400" id="cycle-counter">Cycles: 0</span>
+                </div>
+                <div class="space-y-2 text-xs font-mono flex-1 flex flex-col justify-around">
+                    <div class="bg-slate-950 p-2 rounded border border-slate-800/80 flex items-center justify-between">
+                        <div class="flex items-center gap-2"><span class="text-amber-400 font-bold w-12">PORTA</span><span class="text-slate-400">SW:</span><span class="text-amber-400 font-bold" id="reg-porta-hex">0x00</span></div>
+                        <div class="text-[10px] text-slate-500 font-mono" id="reg-porta-bin">00000000</div>
+                        <div class="text-[10px] text-slate-400">TRISA: <span id="reg-trisa-hex" class="text-slate-200">0xFF</span></div>
+                    </div>
+                    <div class="bg-slate-950 p-2 rounded border border-slate-800/80 flex items-center justify-between">
+                        <div class="flex items-center gap-2"><span class="text-cyan-400 font-bold w-12">LATB</span><span class="text-slate-400">列:</span><span class="text-cyan-400 font-bold" id="reg-latb-hex">0xFF</span></div>
+                        <div class="text-[10px] text-slate-500 font-mono" id="reg-latb-bin">11111111</div>
+                        <div class="text-[10px] text-slate-400">TRISB: <span id="reg-trisb-hex" class="text-slate-200">0x00</span></div>
+                    </div>
+                    <div class="bg-slate-950 p-2 rounded border border-slate-800/80 flex items-center justify-between">
+                        <div class="flex items-center gap-2"><span class="text-emerald-400 font-bold w-12">LATC</span><span class="text-slate-400">行:</span><span class="text-emerald-400 font-bold" id="reg-latc-hex">0x00</span></div>
+                        <div class="text-[10px] text-slate-500 font-mono" id="reg-latc-bin">00000000</div>
+                        <div class="text-[10px] text-slate-400">TRISC: <span id="reg-trisc-hex" class="text-slate-200">0x00</span></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<footer class="h-32 bg-slate-900 border-t border-slate-800 flex flex-col shrink-0 z-20">
+    <div class="h-6 bg-slate-950 border-b border-slate-800/80 flex items-center justify-between px-4 text-xs select-none">
+        <span class="font-semibold text-slate-300">ビルド＆コンソールログ</span>
+        <div class="flex items-center gap-3">
+            <span class="text-[10px] text-slate-500">F5: コンパイル＆書き込み / Space: 一時停止 / Ctrl+R: リセット</span>
+            <button id="btn-clear-log" class="text-[11px] text-slate-400 hover:text-slate-200 transition-colors">ログ消去</button>
+        </div>
+    </div>
+    <div id="console-output" class="flex-1 p-2.5 font-mono text-xs overflow-y-auto space-y-0.5 bg-slate-950/90"></div>
+</footer>
+
+<script>
+// ===================== PRESET CODE LIBRARY =====================
+const PRESETS = {
+    default: String.raw`/*
+ * PIC16F18857 8x8 ドットマトリクス LED 制御
+ * 配線: PORTA=タクトスイッチ / PORTB=カソード列(直接) / PORTC=アノード行(1kΩ抵抗)
+ */
+#include <xc.h>
+#define _XTAL_FREQ 32000000
+
+const uint8_t pattern_heart[8] = {
+    0b00000000,
+    0b01100110,
+    0b11111111,
+    0b11111111,
+    0b01111110,
+    0b00111100,
+    0b00011000,
+    0b00000000
+};
+
+const uint8_t pattern_cross[8] = {
+    0b10000001,
+    0b01000010,
+    0b00100100,
+    0b00011000,
+    0b00011000,
+    0b00100100,
+    0b01000010,
+    0b10000001
+};
+
+const uint8_t pattern_circle[8] = {
+    0b00111100,
+    0b01000010,
+    0b10000001,
+    0b10000001,
+    0b10000001,
+    0b10000001,
+    0b01000010,
+    0b00111100
+};
+
+void main(void) {
+    TRISA = 0xFF;   // PORTA = 入力(スイッチ)
+    TRISB = 0x00;   // PORTB = 出力(カソード列)
+    TRISC = 0x00;   // PORTC = 出力(アノード行)
+    LATB = 0xFF;    // 全列消灯
+    LATC = 0x00;    // 全行消灯
+
+    while(1) {
+        const uint8_t *pat = pattern_circle;
+        if (PORTAbits.RA0 == 1) pat = pattern_heart;
+        else if (PORTAbits.RA1 == 1) pat = pattern_cross;
+
+        for(uint8_t row = 0; row < 8; row++) {
+            LATB = 0xFF;            // ゴースト防止
+            LATC = (1 << row);      // 行選択(HIGH)
+            LATB = ~(pat[row]);     // 列データ(LOW=点灯)
+            __delay_ms(2);
+        }
+    }
+}`,
+
+    scroll: String.raw`/* 自動パターン切り替えアニメーション (P-I-C) */
+#include <xc.h>
+#define _XTAL_FREQ 32000000
+
+const uint8_t frame_P[8] = {0x00,0x7E,0x42,0x42,0x7E,0x40,0x40,0x00};
+const uint8_t frame_I[8] = {0x00,0x3E,0x08,0x08,0x08,0x08,0x3E,0x00};
+const uint8_t frame_C[8] = {0x00,0x3C,0x42,0x40,0x40,0x42,0x3C,0x00};
+
+void display_pattern(const uint8_t data[8], uint16_t duration_ms) {
+    uint16_t loops = duration_ms / 16;
+    for(uint16_t l = 0; l < loops; l++) {
+        for(uint8_t r = 0; r < 8; r++) {
+            LATB = 0xFF;
+            LATC = (1 << r);
+            LATB = ~(data[r]);
+            __delay_ms(2);
+        }
+    }
+}
+
+void main(void) {
+    TRISA = 0xFF;
+    TRISB = 0x00;
+    TRISC = 0x00;
+    while(1) {
+        display_pattern(frame_P, 400);
+        display_pattern(frame_I, 400);
+        display_pattern(frame_C, 400);
+    }
+}`,
+
+    diag: String.raw`/* 回路診断スウィープテスト (行→列の順に確認) */
+#include <xc.h>
+#define _XTAL_FREQ 32000000
+
+void main(void) {
+    TRISA = 0xFF;
+    TRISB = 0x00;   // カソード列(直接接続)
+    TRISC = 0x00;   // アノード行(1kΩ経由)
+    while(1) {
+        for(uint8_t r = 0; r < 8; r++) {
+            LATC = (1 << r);
+            LATB = 0x00;
+            __delay_ms(60);
+        }
+        LATC = 0x00;
+        for(uint8_t c = 0; c < 8; c++) {
+            LATC = 0xFF;
+            LATB = ~(1 << c);
+            __delay_ms(60);
+        }
+        LATB = 0xFF;
+        __delay_ms(200);
+    }
+}`,
+
+    chase: String.raw`/* 蛇行(チェイス)点灯: 外周を1点が巡回 */
+#include <xc.h>
+#define _XTAL_FREQ 32000000
+
+const uint8_t chase_x[28] = {
+    0,0,0,0,0,0,0,0, 1,2,3,4,5,6,7, 7,7,7,7,7,7,7,7, 6,5,4,3,2,1
+};
+const uint8_t chase_y[28] = {
+    0,1,2,3,4,5,6,7, 7,7,7,7,7,7,7, 6,5,4,3,2,1,0,0, 0,0,0,0,0,0
+};
+
+void main(void) {
+    TRISA = 0xFF;
+    TRISB = 0x00;
+    TRISC = 0x00;
+    uint8_t pos = 0;
+    while(1) {
+        for(uint8_t row = 0; row < 8; row++) {
+            LATB = 0xFF;
+            LATC = (1 << row);
+            uint8_t col_data = 0xFF;
+            if (chase_x[pos] == row) col_data &= ~(1 << chase_y[pos]);
+            LATB = col_data;
+            __delay_ms(2);
+        }
+        static uint8_t cnt = 0;
+        cnt++;
+        if (cnt >= 6) { cnt = 0; pos++; if (pos >= 28) pos = 0; }
+    }
+}`,
+
+    button_draw: String.raw`/* ボタン自由描画: RA0-3=カーソル移動 RA6=描画トグル RA7=全消去 */
+#include <xc.h>
+#define _XTAL_FREQ 32000000
+
+uint8_t canvas[8] = {0};
+uint8_t cx = 3, cy = 3;
+
+void main(void) {
+    TRISA = 0xFF;
+    TRISB = 0x00;
+    TRISC = 0x00;
+    while(1) {
+        static uint8_t prev_a = 0;
+        uint8_t cur_a = PORTA;
+        uint8_t edge = cur_a & ~prev_a;
+        prev_a = cur_a;
+
+        if (edge & (1<<0)) { if (cx < 7) cx++; }
+        if (edge & (1<<1)) { if (cx > 0) cx--; }
+        if (edge & (1<<2)) { if (cy < 7) cy++; }
+        if (edge & (1<<3)) { if (cy > 0) cy--; }
+        if (edge & (1<<6)) { canvas[cy] ^= (1<<cx); }
+        if (edge & (1<<7)) { for(uint8_t i=0;i<8;i++) canvas[i]=0; }
+
+        static uint16_t blink = 0;
+        blink++;
+        uint8_t show_cursor = (blink & 0x40) ? 1 : 0;
+
+        for(uint8_t row=0; row<8; row++) {
+            LATB = 0xFF;
+            LATC = (1 << row);
+            uint8_t col = ~canvas[row];
+            if (row == cy && show_cursor) col &= ~(1 << cx);
+            LATB = col;
+            __delay_ms(2);
+        }
+    }
+}`,
+
+    error_demo: String.raw`/* 構文エラーデモ(修正練習用): 意図的に5件のエラーを埋め込み */
+#include <xc.h>
+#define _XTAL_FREQ 32000000
+
+void main(void) {
+    PORATAbits.RA0 = 1;
+    TRISC = 0x00
+    LATB = 0xFF;
+    if (PORTAbits.RA1 == 1 { LATC = 0xFF; }
+    LATB = ;
+    while(1) {
+        LATC = 0x01;
+        __delay_ms(100);
+`
+};
+
+// ===================== SYNTAX ANALYZER =====================
+function analyzeCSyntax(cCode) {
+    const errors = [];
+    const lines = cCode.split("\n");
+    const validIdents = new Set([
+        "TRISA","TRISB","TRISC","PORTA","PORTB","PORTC","LATA","LATB","LATC",
+        "ANSELA","ANSELB","ANSELC","PORTAbits","PORTBbits","PORTCbits",
+        "LATAbits","LATBbits","LATCbits","RA0","RA1","RA2","RA3","RA4","RA5","RA6","RA7",
+        "RB0","RB1","RB2","RB3","RB4","RB5","RB6","RB7","RC0","RC1","RC2","RC3","RC4","RC5","RC6","RC7",
+        "_XTAL_FREQ","__delay_ms","__delay_us","delay_ms","delay_us",
+        "main","uint8_t","uint16_t","uint32_t","int","void","char","const","unsigned","static",
+        "if","else","for","while","return","switch","case","break","include","define","pragma","default"
+    ]);
+    const braceStack = [];
+    let inComment = false;
+    let depth = 0;
+
+    lines.forEach((rawLine, idx) => {
+        const lineNum = idx + 1;
+        let t = rawLine;
+
+        if (inComment) {
+            const e = t.indexOf("*/");
+            if (e === -1) return;
+            t = t.substring(e + 2);
+            inComment = false;
+        }
+        for (;;) {
+            const s = t.indexOf("/*");
+            if (s === -1) break;
+            const e = t.indexOf("*/", s + 2);
+            if (e === -1) { t = t.substring(0, s); inComment = true; break; }
+            t = t.substring(0, s) + t.substring(e + 2);
+        }
+        const ci = t.indexOf("//");
+        if (ci !== -1) t = t.substring(0, ci);
+        t = t.trim();
+
+        const depthBefore = depth;
+        for (const ch of t) {
+            if (ch === "(" || ch === "{" || ch === "[") depth++;
+            else if (ch === ")" || ch === "}" || ch === "]") depth = Math.max(0, depth - 1);
+        }
+        const depthAfter = depth;
+        if (!t) return;
+
+        for (const ch of t) {
+            if (ch === "{") braceStack.push(lineNum);
+            else if (ch === "}") {
+                if (braceStack.length === 0) errors.push({ line: lineNum, message: "対応する '{' がない閉じカッコ '}' です。" });
+                else braceStack.pop();
+            }
+        }
+
+        const isPre = t.startsWith("#");
+        const isCtl = /^(if|else|for|while|switch|case|default)\b/.test(t);
+        const endsOk = /[;{}:,]$/.test(t);
+        if (!isPre && !isCtl && !endsOk && depthBefore === 0 && depthAfter === 0) {
+            errors.push({ line: lineNum, message: "文末のセミコロン ';' が不足しています。" });
+        }
+
+        const words = t.match(/\b[A-Za-z_][A-Za-z0-9_]*\b/g) || [];
+        words.forEach(w => {
+            if (/(PORT|LAT|TRIS|ANSEL)/.test(w) && !validIdents.has(w)) {
+                let hint = "PORTA / LATC / TRISA など";
+                if (w.indexOf("PORATA") === 0) hint = "PORTA / PORTAbits";
+                else if (/(PORTD|PORTE|PORTF)/.test(w)) hint = "このシミュレータでは PORTA / PORTB / PORTC のみ使用可能";
+                else if (/(TRISD|TRISE|TRISF)/.test(w)) hint = "TRISA / TRISB / TRISC";
+                else if (/(LATD|LATE|LATF)/.test(w)) hint = "LATA / LATB / LATC";
+                errors.push({ line: lineNum, message: "未定義のレジスタ名 '" + w + "' です。（正: " + hint + "）" });
+            }
+        });
+
+        if (/=\s*;/.test(t)) errors.push({ line: lineNum, message: "代入演算子 '=' の右辺の値が不足しています。" });
+
+        if (/^(if|while|for)\s*\(/.test(t)) {
+            const o = (t.match(/\(/g) || []).length;
+            const c = (t.match(/\)/g) || []).length;
+            if (o > c) errors.push({ line: lineNum, message: "条件式の閉じカッコ ')' が不足しています。" });
+        }
+    });
+
+    while (braceStack.length > 0) {
+        const u = braceStack.pop();
+        errors.push({ line: u, message: "行 " + u + " で開いたブロック '{' が閉じられていません。" });
+    }
+    return { errors: errors, warnings: [] };
+}
+
+// ===================== VIRTUAL MCU =====================
+class VirtualMCU {
+    constructor() {
+        this.TRISA=0xFF; this.TRISB=0x00; this.TRISC=0x00;
+        this.PORTA=0x00; this.PORTB=0x00; this.PORTC=0x00;
+        this.LATA=0x00; this.LATB=0xFF; this.LATC=0x00;
+        this.cycles=0; this.running=false; this.paused=false; this.speedFactor=1.0;
+    }
+    reset() {
+        this.TRISA=0xFF; this.TRISB=0x00; this.TRISC=0x00;
+        this.LATA=0x00; this.LATB=0xFF; this.LATC=0x00; this.cycles=0;
+        this.running=false; this.paused=false;
+        updateRegisterUI();
+    }
+    setTRIS(p,v){ v=v&0xFF; if(p==="A")this.TRISA=v; if(p==="B")this.TRISB=v; if(p==="C")this.TRISC=v; updateRegisterUI(); }
+    setANSEL(p,v){ /* アナログセレクタ: シミュレータではデジタル固定 */ }
+    setLAT(p,v){ v=v&0xFF; if(p==="A")this.LATA=v; if(p==="B")this.LATB=v; if(p==="C")this.LATC=v; this.updateHardware(); updateRegisterUI(); }
+    setBit(r,b,v){ b=parseInt(b); v=parseInt(v)?1:0; let c=0; if(r==="PORTA")c=this.PORTA; else if(r==="LATC")c=this.LATC; else if(r==="LATB")c=this.LATB; else if(r==="LATA")c=this.LATA; if(v)c|=(1<<b); else c&=~(1<<b); if(r==="PORTA")this.PORTA=c; else if(r==="LATC")this.LATC=c; else if(r==="LATB")this.LATB=c; else if(r==="LATA")this.LATA=c; this.updateHardware(); updateRegisterUI(); }
+    getPORT(p){ if(p==="A")return this.PORTA&0xFF; if(p==="B")return((this.LATB&~this.TRISB)|(this.PORTB&this.TRISB))&0xFF; if(p==="C")return((this.LATC&~this.TRISC)|(this.PORTC&this.TRISC))&0xFF; return 0; }
+    getBit(r,b){ let v=0; if(r==="PORTA")v=this.PORTA; else if(r==="LATC")v=this.LATC; else if(r==="LATB")v=this.LATB; else if(r==="LATA")v=this.LATA; return(v>>b)&1; }
+    async delay_ms(ms){ this.cycles+=Math.floor(ms*3200); document.getElementById("cycle-counter").textContent="Cycles: "+this.cycles.toLocaleString(); if(!this.running)throw new Error("MCU_STOPPED"); while(this.paused){ await new Promise(r=>setTimeout(r,50)); if(!this.running)throw new Error("MCU_STOPPED"); } let rm=ms/this.speedFactor; if(rm<0.1)rm=0.1; await new Promise(r=>setTimeout(r,rm)); }
+    async delay_us(us){ this.cycles+=Math.floor(us*3.2); if(!this.running)throw new Error("MCU_STOPPED"); }
+    updateHardware(){ for(let r=0;r<8;r++){ const a=((this.LATC&(1<<r))!==0); for(let c=0;c<8;c++){ const k=((this.LATB&(1<<c))===0); if(a&&k)ledGlow[r][c]=1.0; } } }
+}
+const mcu=new VirtualMCU();
+const ledGlow=Array(8).fill(0).map(()=>Array(8).fill(0.0));
+
+// ===================== UI REFERENCES =====================
+const codeEditor=document.getElementById("code-editor");
+const lineGutter=document.getElementById("line-gutter");
+const consoleOutput=document.getElementById("console-output");
+const errorListContainer=document.getElementById("error-list");
+const errorBadge=document.getElementById("error-badge");
+const errorCountText=document.getElementById("error-count-text");
+let detectedErrors=[];
+
+function runLiveSyntaxCheck() {
+    const code=codeEditor.value;
+    detectedErrors=analyzeCSyntax(code).errors;
+    const total=detectedErrors.length;
+    const lines=code.split("\n").length;
+    const map=new Map();
+    detectedErrors.forEach(e=>{ if(!map.has(e.line))map.set(e.line,[]); map.get(e.line).push(e); });
+    let gh="";
+    for(let i=1;i<=lines;i++){
+        if(map.has(i)){ const msgs=map.get(i).map(x=>x.message).join(" / "); gh+='<div class="h-[22px] leading-[22px] flex items-center justify-between px-1 text-red-400 font-bold bg-red-950/70 w-full cursor-pointer" title="'+msgs+'" onclick="jumpToLine('+i+')"><span class="text-[10px]">&#x26A0;</span><span>'+i+'</span></div>'; }
+        else gh+='<div class="h-[22px] leading-[22px] flex items-center justify-end px-1 text-slate-600">'+i+'</div>';
+    }
+    lineGutter.innerHTML=gh;
+    if(total>0){
+        errorBadge.classList.remove("hidden"); errorBadge.textContent=total+" Errors"; errorCountText.textContent=total;
+        let h=""; detectedErrors.forEach(e=>{ h+='<div class="error-item flex items-center justify-between bg-red-950/40 border border-red-800/40 rounded px-2 py-1" onclick="jumpToLine('+e.line+')"><div class="flex items-center gap-2 text-red-200 truncate"><span class="bg-red-600 text-white font-bold px-1.5 py-0.5 rounded text-[10px] shrink-0">行 '+e.line+'</span><span class="truncate">'+e.message+'</span></div><button class="ml-2 bg-red-800 hover:bg-red-700 text-white px-2 py-0.5 rounded text-[10px] whitespace-nowrap shrink-0" onclick="event.stopPropagation(); jumpToLine('+e.line+')">移動 &#x2794;</button></div>'; });
+        errorListContainer.innerHTML=h;
+        document.getElementById("editor-status").textContent="構文エラー "+total+"件";
+        document.getElementById("editor-status").className="text-[10px] text-red-400 bg-red-950/80 px-1.5 py-0.5 rounded border border-red-800/50";
+        document.getElementById("status-indicator").className="w-2.5 h-2.5 rounded-full bg-red-500 animate-ping";
+    } else {
+        errorBadge.classList.add("hidden"); errorCountText.textContent="0";
+        errorListContainer.innerHTML='<div class="text-emerald-400 font-semibold px-2 py-1 flex items-center gap-1.5"><svg class="w-4 h-4 fill-current" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z"/></svg>構文エラーはありません。プログラムは正常です。</div>';
+        document.getElementById("editor-status").textContent="構文チェック完了";
+        document.getElementById("editor-status").className="text-[10px] text-emerald-400 bg-emerald-950/80 px-1.5 py-0.5 rounded border border-emerald-800/50";
+        document.getElementById("status-indicator").className="w-2.5 h-2.5 rounded-full bg-emerald-400";
+    }
+}
+
+window.jumpToLine=function(lineNum){
+    const lines=codeEditor.value.split("\n");
+    let ci=0; for(let i=0;i<Math.min(lineNum-1,lines.length);i++)ci+=lines[i].length+1;
+    codeEditor.focus(); const ll=lines[lineNum-1]?lines[lineNum-1].length:0;
+    codeEditor.setSelectionRange(ci,ci+ll); codeEditor.scrollTop=Math.max(0,(lineNum-3)*22); lineGutter.scrollTop=codeEditor.scrollTop;
+};
+
+codeEditor.addEventListener("input",runLiveSyntaxCheck);
+codeEditor.addEventListener("scroll",()=>{ lineGutter.scrollTop=codeEditor.scrollTop; });
+codeEditor.addEventListener("keydown",(e)=>{ if(e.key==="Tab"){e.preventDefault();const s=codeEditor.selectionStart,en=codeEditor.selectionEnd;codeEditor.value=codeEditor.value.substring(0,s)+"    "+codeEditor.value.substring(en);codeEditor.selectionStart=codeEditor.selectionEnd=s+4;runLiveSyntaxCheck();} if(e.key==="F5"){e.preventDefault();buildAndFlash();} });
+codeEditor.addEventListener("keyup",updateCursorPos); codeEditor.addEventListener("click",updateCursorPos);
+function updateCursorPos(){ const t=codeEditor.value.substring(0,codeEditor.selectionStart); const l=t.split("\n"); document.getElementById("cursor-pos").textContent="Ln "+l.length+", Col "+(l[l.length-1].length+1); }
+
+function logConsole(msg,type){ type=type||"info"; const tm=new Date().toLocaleTimeString("ja-JP",{hour12:false}); const d=document.createElement("div"); d.className="console-line"; let c="console-info"; if(type==="success")c="console-success"; if(type==="warn")c="console-warn"; if(type==="error")c="console-error"; if(type==="system")c="console-system"; d.innerHTML='<span class="console-time">['+tm+']</span> <span class="'+c+'">'+msg+"</span>"; consoleOutput.appendChild(d); consoleOutput.scrollTop=consoleOutput.scrollHeight; }
+document.getElementById("btn-clear-log").addEventListener("click",()=>{ consoleOutput.innerHTML=""; });
+
+// ===================== SWITCHES (PORTA) =====================
+const switchesGrid=document.getElementById("switches-grid");
+for(let i=0;i<8;i++){
+    const sw=document.createElement("button"); sw.className="p-1.5 rounded bg-slate-950 border border-slate-800 flex flex-col items-center justify-between transition-all select-none hover:border-amber-500/50 tooltip"; sw.id="sw-"+i; sw.setAttribute("data-tip","RA"+i+" / キー "+(i+1));
+    sw.innerHTML='<div class="w-2.5 h-2.5 rounded-full bg-slate-800 border border-slate-700 mb-1 transition-all" id="sw-led-'+i+'"></div><span class="text-[9px] font-mono text-slate-300 font-bold">RA'+i+'</span><span class="text-[8px] font-mono text-slate-500">Key '+(i+1)+'</span>';
+    const press=(e)=>{if(e)e.preventDefault();mcu.PORTA|=(1<<i);sw.classList.add("sw-active");document.getElementById("sw-led-"+i).classList.add("sw-led-active");updateRegisterUI();};
+    const release=(e)=>{if(e)e.preventDefault();mcu.PORTA&=~(1<<i);sw.classList.remove("sw-active");document.getElementById("sw-led-"+i).classList.remove("sw-led-active");updateRegisterUI();};
+    sw.addEventListener("mousedown",press); sw.addEventListener("mouseup",release); sw.addEventListener("mouseleave",release); sw.addEventListener("touchstart",press); sw.addEventListener("touchend",release);
+    switchesGrid.appendChild(sw);
+}
+window.addEventListener("keydown",(e)=>{ if(document.activeElement===codeEditor)return; const k=parseInt(e.key); if(k>=1&&k<=8){const i=k-1;mcu.PORTA|=(1<<i);document.getElementById("sw-"+i).classList.add("sw-active");document.getElementById("sw-led-"+i).classList.add("sw-led-active");updateRegisterUI();} if(e.key===" "){e.preventDefault();if(mcu.running){mcu.paused=!mcu.paused;updateRunButtonUI();logConsole(mcu.paused?"実行を一時停止。":"実行を再開。","warn");}} if(e.key==="r"&&e.ctrlKey){e.preventDefault();mcu.reset();logConsole("MCLR リセットを実行しました。","warn");updateRunButtonUI();} });
+window.addEventListener("keyup",(e)=>{ if(document.activeElement===codeEditor)return; const k=parseInt(e.key); if(k>=1&&k<=8){const i=k-1;mcu.PORTA&=~(1<<i);document.getElementById("sw-"+i).classList.remove("sw-active");document.getElementById("sw-led-"+i).classList.remove("sw-led-active");updateRegisterUI();} });
+
+// ===================== RESISTOR NETWORK =====================
+const resGraphic=document.getElementById("resistor-network-graphic");
+for(let r=0;r<8;r++){ const ln=document.createElement("div"); ln.className="flex items-center justify-between text-[9px] font-mono text-slate-400"; ln.innerHTML='<span class="w-5 text-emerald-400 font-bold">RC'+r+'</span><div class="flex-1 mx-1.5 h-2 bg-slate-950 rounded border border-slate-800 flex items-center justify-center relative overflow-hidden"><div id="res-bar-'+r+'" class="h-full w-full bg-amber-950/30 transition-all duration-75"></div><div class="absolute inset-0 flex items-center justify-center text-[7px] text-slate-600">1k&#x2126;</div></div><span class="w-8 text-right text-slate-500">Row'+r+'</span>'; resGraphic.appendChild(ln); }
+
+// ===================== CHIP PINOUT =====================
+const pinsLeftData=[{pin:1,label:"MCLR",type:"pwr"},{pin:2,label:"RA0",type:"A"},{pin:3,label:"RA1",type:"A"},{pin:4,label:"RA2",type:"A"},{pin:5,label:"RA3",type:"A"},{pin:6,label:"RA4",type:"A"},{pin:7,label:"RA5",type:"A"},{pin:8,label:"VSS",type:"pwr"},{pin:9,label:"RA6",type:"A"},{pin:10,label:"RA7",type:"A"},{pin:11,label:"RC0",type:"C"},{pin:12,label:"RC1",type:"C"},{pin:13,label:"RC2",type:"C"},{pin:14,label:"RC3",type:"C"}];
+const pinsRightData=[{pin:28,label:"RB7",type:"B"},{pin:27,label:"RB6",type:"B"},{pin:26,label:"RB5",type:"B"},{pin:25,label:"RB4",type:"B"},{pin:24,label:"RB3",type:"B"},{pin:23,label:"RB2",type:"B"},{pin:22,label:"RB1",type:"B"},{pin:21,label:"RB0",type:"B"},{pin:20,label:"VDD",type:"pwr"},{pin:19,label:"VSS",type:"pwr"},{pin:18,label:"RC7",type:"C"},{pin:17,label:"RC6",type:"C"},{pin:16,label:"RC5",type:"C"},{pin:15,label:"RC4",type:"C"}];
+const pinsLeftContainer=document.getElementById("chip-pins-left");
+const pinsRightContainer=document.getElementById("chip-pins-right");
+function getPinColor(t){ if(t==="A")return"text-amber-400"; if(t==="B")return"text-cyan-400"; if(t==="C")return"text-emerald-400"; return"text-slate-500"; }
+pinsLeftData.forEach(p=>{ const d=document.createElement("div"); d.className="flex items-center space-x-1"; d.id="pin-left-"+p.pin; d.innerHTML='<span class="text-slate-600 font-bold w-3">'+p.pin+'</span><span class="font-mono '+getPinColor(p.type)+'">'+p.label+'</span>'; pinsLeftContainer.appendChild(d); });
+pinsRightData.forEach(p=>{ const d=document.createElement("div"); d.className="flex items-center justify-end space-x-1"; d.id="pin-right-"+p.pin; d.innerHTML='<span class="font-mono '+getPinColor(p.type)+'">'+p.label+'</span><span class="text-slate-600 font-bold w-3">'+p.pin+'</span>'; pinsRightContainer.appendChild(d); });
+
+// ===================== REGISTER MONITOR =====================
+function toHex(v){ return "0x"+(v&0xFF).toString(16).toUpperCase().padStart(2,"0"); }
+function toBin(v){ return (v&0xFF).toString(2).padStart(8,"0"); }
+function updateRegisterUI(){
+    document.getElementById("reg-porta-hex").textContent=toHex(mcu.PORTA); document.getElementById("reg-porta-bin").textContent=toBin(mcu.PORTA); document.getElementById("reg-trisa-hex").textContent=toHex(mcu.TRISA);
+    document.getElementById("reg-latb-hex").textContent=toHex(mcu.LATB); document.getElementById("reg-latb-bin").textContent=toBin(mcu.LATB); document.getElementById("reg-trisb-hex").textContent=toHex(mcu.TRISB);
+    document.getElementById("reg-latc-hex").textContent=toHex(mcu.LATC); document.getElementById("reg-latc-bin").textContent=toBin(mcu.LATC); document.getElementById("reg-trisc-hex").textContent=toHex(mcu.TRISC);
+    for(let r=0;r<8;r++){ const b=document.getElementById("res-bar-"+r); const h=(mcu.LATC&(1<<r))!==0; b.className=h?"h-full w-full bg-amber-500 shadow-[0_0_8px_#f59e0b] transition-all duration-75":"h-full w-full bg-amber-950/30 transition-all duration-75"; }
+    for(let i=0;i<8;i++){
+        const pa=(mcu.PORTA>>i)&1, lb=(mcu.LATB>>i)&1, lc=(mcu.LATC>>i)&1;
+        const lA=pinsLeftData.find(p=>p.label==="RA"+i); if(lA){ const e=document.getElementById("pin-left-"+lA.pin); if(e){ const s=e.querySelector(".font-mono"); if(pa)s.classList.add("pin-active-a"); else s.classList.remove("pin-active-a"); } }
+        const lC=pinsLeftData.find(p=>p.label==="RC"+i); if(lC){ const e=document.getElementById("pin-left-"+lC.pin); if(e){ const s=e.querySelector(".font-mono"); if(lc)s.classList.add("pin-active-c"); else s.classList.remove("pin-active-c"); } }
+        const rB=pinsRightData.find(p=>p.label==="RB"+i); if(rB){ const e=document.getElementById("pin-right-"+rB.pin); if(e){ const s=e.querySelector(".font-mono"); if(!lb)s.classList.add("pin-active-b"); else s.classList.remove("pin-active-b"); } }
+        const rC=pinsRightData.find(p=>p.label==="RC"+i); if(rC&&i>=4){ const e=document.getElementById("pin-right-"+rC.pin); if(e){ const s=e.querySelector(".font-mono"); if(lc)s.classList.add("pin-active-c"); else s.classList.remove("pin-active-c"); } }
+    }
+}
+
+// ===================== MATRIX CANVAS =====================
+const canvas=document.getElementById("matrix-canvas"); const ctx=canvas.getContext("2d");
+function drawMatrix(){ ctx.clearRect(0,0,canvas.width,canvas.height); const pd=16, cs=(canvas.width-pd*2)/8, rd=cs*0.36; for(let r=0;r<8;r++){ for(let c=0;c<8;c++){ const x=pd+c*cs+cs/2, y=pd+r*cs+cs/2; ledGlow[r][c]*=0.90; if(ledGlow[r][c]<0.01)ledGlow[r][c]=0; const g=ledGlow[r][c]; ctx.beginPath(); ctx.arc(x,y,rd,0,Math.PI*2); ctx.fillStyle="#1a0505"; ctx.fill(); ctx.lineWidth=1; ctx.strokeStyle="#2a0a0a"; ctx.stroke(); if(g>0){ const gr=ctx.createRadialGradient(x,y,1,x,y,rd*1.5); gr.addColorStop(0,"rgba(255,240,240,"+g+")"); gr.addColorStop(0.3,"rgba(255,60,60,"+g+")"); gr.addColorStop(0.7,"rgba(200,0,0,"+(g*0.8)+")"); gr.addColorStop(1,"rgba(255,0,0,0)"); ctx.beginPath(); ctx.arc(x,y,rd*1.4,0,Math.PI*2); ctx.fillStyle=gr; ctx.fill(); ctx.beginPath(); ctx.arc(x,y,rd*0.5,0,Math.PI*2); ctx.fillStyle="rgba(255,255,255,"+(g*0.95)+")"; ctx.fill(); } } } requestAnimationFrame(drawMatrix); }
+requestAnimationFrame(drawMatrix);
+
+// ===================== C -> JS TRANSPILER =====================
+function escapeRegExp(s){ return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"); }
+
+function transpileCtoJS(cCode){
+    let clean = cCode;
+
+    // 1. コメント除去
+    clean = clean.replace(/\/\*[^*]*\*+(?:[^/*][^*]*\*+)*\//g, "");
+    clean = clean.replace(/\/\/[^\n]*/g, "");
+
+    // 2. #define 抽出とプリプロセッサ行除去
+    const defines = {};
+    let m;
+    const defRe = /#define\s+([A-Za-z0-9_]+)\s+([^\n]+)/g;
+    while ((m = defRe.exec(clean)) !== null) defines[m[1]] = m[2].trim();
+    clean = clean.replace(/^[ \t]*#[^\n]*\n?/gm, "");
+    for (const k in defines) clean = clean.replace(new RegExp("\\b" + escapeRegExp(k) + "\\b", "g"), defines[k]);
+
+    // 3. static 変数を関数外(先頭)へホイスト
+    const hoisted = [];
+    clean = clean.replace(/\bstatic\s+(uint8_t|uint16_t|uint32_t|int|char|unsigned\s+char|unsigned\s+int)\s+([A-Za-z0-9_]+)\s*=\s*([^;\n]+);/g, (mm, ty, name, val) => { hoisted.push("let " + name + " = " + val.trim() + ";"); return ""; });
+
+    // 4. 配列初期化子 { ... } -> [ ... ]
+    clean = clean.replace(/=\s*\{([^;{}]+)\}\s*;/g, (mm, inner) => "= [" + inner.trim() + "];");
+
+    // 5. ユーザー関数定義を async 化
+    const userFns = new Set();
+    const fnRe = /(?:void|int|uint8_t|uint16_t|uint32_t)\s+([A-Za-z0-9_]+)\s*\(([^)]*)\)\s*\{/g;
+    while ((m = fnRe.exec(clean)) !== null) if (m[1] !== "main") userFns.add(m[1]);
+    userFns.forEach(fn => {
+        const re = new RegExp("(?:void|int|uint8_t|uint16_t|uint32_t)\\s+" + escapeRegExp(fn) + "\\s*\\(([^)]*)\\)\\s*\\{", "g");
+        clean = clean.replace(re, (mm, params) => {
+            const pc = params.split(",").map(p => p.trim()
+                .replace(/(?:const\s+)?(?:uint8_t|int8_t|uint16_t|int16_t|uint32_t|unsigned\s+char|char|unsigned\s+int|int)\s*\*?\s*/, "")
+                .replace(/\[[^\]]*\]/, "").trim()).filter(p => p).join(", ");
+            return "async function __UFN_" + fn + "__(" + pc + ") {";
+        });
+    });
+
+    // 6. main を async 化
+    clean = clean.replace(/\b(?:void|int)\s+main\s*\([^)]*\)\s*\{/g, "async function main() {");
+
+    // 7. 型宣言 -> let
+    clean = clean.replace(/\b(?:const\s+)?(?:uint8_t|int8_t|uint16_t|int16_t|uint32_t|unsigned\s+char|unsigned\s+int|char|int)\s*\*?\s*([A-Za-z0-9_]+)\s*(\[[^\]]*\])?\s*(?=[=,;])/g, "let $1 ");
+
+    // 8. ホイストした static 変数を先頭に挿入
+    if (hoisted.length) clean = hoisted.join("\n") + "\n" + clean;
+
+    // 9. ユーザー関数呼び出しへ await を付与
+    userFns.forEach(fn => { clean = clean.replace(new RegExp("\\b" + escapeRegExp(fn) + "\\s*\\(", "g"), "await " + fn + "("); });
+    userFns.forEach(fn => { clean = clean.replace(new RegExp("__UFN_" + escapeRegExp(fn) + "__", "g"), fn); });
+
+    // 10. レジスタ全体代入
+    clean = clean.replace(/\bTRISA\s*=(?!=)\s*([^;]+);/g, 'mcu.setTRIS("A", $1);');
+    clean = clean.replace(/\bTRISB\s*=(?!=)\s*([^;]+);/g, 'mcu.setTRIS("B", $1);');
+    clean = clean.replace(/\bTRISC\s*=(?!=)\s*([^;]+);/g, 'mcu.setTRIS("C", $1);');
+    clean = clean.replace(/\bANSELA\s*=(?!=)\s*([^;]+);/g, 'mcu.setANSEL("A", $1);');
+    clean = clean.replace(/\bANSELB\s*=(?!=)\s*([^;]+);/g, 'mcu.setANSEL("B", $1);');
+    clean = clean.replace(/\bANSELC\s*=(?!=)\s*([^;]+);/g, 'mcu.setANSEL("C", $1);');
+    clean = clean.replace(/\bLATA\s*=(?!=)\s*([^;]+);/g, 'mcu.setLAT("A", $1);');
+    clean = clean.replace(/\bLATB\s*=(?!=)\s*([^;]+);/g, 'mcu.setLAT("B", $1);');
+    clean = clean.replace(/\bLATC\s*=(?!=)\s*([^;]+);/g, 'mcu.setLAT("C", $1);');
+    clean = clean.replace(/\bPORTA\s*=(?!=)\s*([^;]+);/g, 'mcu.setLAT("A", $1);');
+    clean = clean.replace(/\bPORTB\s*=(?!=)\s*([^;]+);/g, 'mcu.setLAT("B", $1);');
+    clean = clean.replace(/\bPORTC\s*=(?!=)\s*([^;]+);/g, 'mcu.setLAT("C", $1);');
+
+    // 11. ビット代入
+    for (let i = 0; i < 8; i++) {
+        clean = clean.replace(new RegExp("\\bPORTAbits\\.RA" + i + "\\s*=(?!=)\\s*([^;]+);", "g"), "mcu.setBit('PORTA', " + i + ", $1);");
+        clean = clean.replace(new RegExp("\\bLATAbits\\.LATA" + i + "\\s*=(?!=)\\s*([^;]+);", "g"), "mcu.setBit('LATA', " + i + ", $1);");
+        clean = clean.replace(new RegExp("\\bLATCbits\\.LATC" + i + "\\s*=(?!=)\\s*([^;]+);", "g"), "mcu.setBit('LATC', " + i + ", $1);");
+        clean = clean.replace(new RegExp("\\bLATBbits\\.LATB" + i + "\\s*=(?!=)\\s*([^;]+);", "g"), "mcu.setBit('LATB', " + i + ", $1);");
+    }
+
+    // 12. ビット参照
+    for (let i = 0; i < 8; i++) {
+        clean = clean.replace(new RegExp("\\bPORTAbits\\.RA" + i + "\\b", "g"), "mcu.getBit('PORTA', " + i + ")");
+        clean = clean.replace(new RegExp("\\bLATAbits\\.LATA" + i + "\\b", "g"), "mcu.getBit('LATA', " + i + ")");
+        clean = clean.replace(new RegExp("\\bLATCbits\\.LATC" + i + "\\b", "g"), "mcu.getBit('LATC', " + i + ")");
+        clean = clean.replace(new RegExp("\\bLATBbits\\.LATB" + i + "\\b", "g"), "mcu.getBit('LATB', " + i + ")");
+    }
+
+    // 13. ポート全体参照
+    clean = clean.replace(/(?<!["'])\bPORTA\b(?!["'])/g, 'mcu.getPORT("A")');
+    clean = clean.replace(/(?<!["'])\bPORTB\b(?!["'])/g, 'mcu.getPORT("B")');
+    clean = clean.replace(/(?<!["'])\bPORTC\b(?!["'])/g, 'mcu.getPORT("C")');
+
+    // 14. ディレイ
+    clean = clean.replace(/\b(?:__delay_ms|delay_ms)\s*\(([^)]+)\);/g, "await mcu.delay_ms($1);");
+    clean = clean.replace(/\b(?:__delay_us|delay_us)\s*\(([^)]+)\);/g, "await mcu.delay_us($1);");
+
+    return clean;
+}
+
+// ===================== BUILD & FLASH =====================
+async function buildAndFlash() {
+    logConsole("==================================================", "system");
+    logConsole("MPLAB XC8 コンパイラによるビルドを開始...", "system");
+    runLiveSyntaxCheck();
+    if (detectedErrors.length > 0) {
+        logConsole("コンパイルエラー: " + detectedErrors.length + " 件の構文エラーを検出したため書き込みを中止しました。", "error");
+        detectedErrors.forEach(e => logConsole("  [行 " + e.line + "] " + e.message, "error"));
+        logConsole("左のエラーリストから該当行へジャンプして修正してください。", "warn");
+        return;
+    }
+    mcu.reset();
+    const src = codeEditor.value;
+    try {
+        const js = transpileCtoJS(src);
+        const executor = new Function("mcu", "return (async () => { " + js + " ; if (typeof main === 'function') { await main(); } else { throw new Error('main() 関数が見つかりません。'); } })();");
+        logConsole("構文解析およびレジスタマッピング... OK", "success");
+        logConsole("コード最適化処理 (-O2)... OK", "success");
+        logConsole("プログラムメモリ: 512 bytes / 32768 bytes (1.6%)", "info");
+        logConsole("ICSP経由で PIC16F18857 へ書き込み中...", "warn");
+        await new Promise(r => setTimeout(r, 300));
+        logConsole("書き込み完了！ マイコンプログラム実行開始...", "success");
+        document.getElementById("editor-status").textContent = "実行中";
+        document.getElementById("editor-status").className = "text-[10px] text-cyan-400 bg-cyan-950/80 px-1.5 py-0.5 rounded border border-cyan-800/50";
+        mcu.running = true; mcu.paused = false; updateRunButtonUI();
+        executor(mcu).catch(err => {
+            if (err.message !== "MCU_STOPPED") {
+                logConsole("実行時エラー: " + err.message, "error");
+                document.getElementById("editor-status").textContent = "実行時エラー";
+                document.getElementById("editor-status").className = "text-[10px] text-red-400 bg-red-950/80 px-1.5 py-0.5 rounded border border-red-800/50";
+            }
+        });
+    } catch (e) {
+        logConsole("ビルド失敗: " + e.message, "error");
+        document.getElementById("editor-status").textContent = "ビルドエラー";
+        document.getElementById("editor-status").className = "text-[10px] text-red-400 bg-red-950/80 px-1.5 py-0.5 rounded border border-red-800/50";
+    }
+}
+
+document.getElementById("btn-flash").addEventListener("click", buildAndFlash);
+document.getElementById("btn-run").addEventListener("click", () => { if (!mcu.running) buildAndFlash(); else { mcu.paused = !mcu.paused; updateRunButtonUI(); logConsole(mcu.paused ? "マイコン実行を一時停止。" : "マイコン実行を再開。", "warn"); } });
+document.getElementById("btn-reset").addEventListener("click", () => { mcu.reset(); logConsole("MCLR リセットを実行しました。", "warn"); updateRunButtonUI(); });
+function updateRunButtonUI(){ const b=document.getElementById("btn-run"),i=document.getElementById("run-icon"),t=document.getElementById("run-text"); if(mcu.running&&!mcu.paused){ i.textContent="\u23F8"; t.textContent="一時停止"; b.className="btn-press flex items-center space-x-2 px-3.5 py-1.5 bg-amber-600 hover:bg-amber-500 text-white font-medium text-xs rounded-md shadow transition-all border border-amber-400/30 shrink-0"; } else { i.textContent="\u25B6"; t.textContent=mcu.paused?"再開":"実行"; b.className="btn-press flex items-center space-x-2 px-3.5 py-1.5 bg-cyan-600 hover:bg-cyan-500 text-white font-medium text-xs rounded-md shadow transition-all border border-cyan-400/30 shrink-0"; } }
+document.getElementById("preset-select").addEventListener("change", (e) => { const k = e.target.value; if (PRESETS[k]) { codeEditor.value = PRESETS[k]; runLiveSyntaxCheck(); logConsole("サンプルコードを読み込みました: " + e.target.options[e.target.selectedIndex].text, "info"); } });
+document.getElementById("speed-slider").addEventListener("input", (e) => { mcu.speedFactor = parseFloat(e.target.value); document.getElementById("speed-val").textContent = mcu.speedFactor.toFixed(1) + "x"; });
+
+window.addEventListener("DOMContentLoaded", () => {
+    codeEditor.value = PRESETS.default;
+    runLiveSyntaxCheck();
+    updateRegisterUI();
+    logConsole("PIC16F18857 + 8x8ドットマトリクス LED シミュレータを起動しました。", "system");
+    logConsole("配線: PORTA=タクトスイッチ / PORTB=カソード列(直接) / PORTC=アノード行(1kΩ抵抗)", "info");
+    logConsole("『コンパイル＆書き込み』ボタンまたはF5キーでCコードを実行できます。", "info");
+});
+</script>
+</body>
+</html>
